@@ -12,14 +12,14 @@ from html.parser import HTMLParser
 from urllib.parse import urljoin
 
 # Constants
-DEFAULT_SERVER = "www.example.com"
+DEFAULT_SERVER = "www.3700.network"
 DEFAULT_PORT = 443
-LOGIN_PATH = "/accounts/login/"
-ORIGIN_PATH = "/example/"
+LOGIN_PATH = "/accounts/login/?next=/fakebook/"
+ORIGIN_PATH = "/fakebook/"
 
 global_found_flags = []
 
-# HTML Parser
+# HTMLParser
 class CustomHTMLParser(HTMLParser):
     def __init__(self, web_crawler):
         super().__init__()
@@ -28,7 +28,7 @@ class CustomHTMLParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag == "a":
             for attr in attrs:
-                if attr[0] == 'href' and attr[1].startswith("/example/"):
+                if attr[0] == 'href' and attr[1].startswith("/fakebook/"):
                     full_link = urljoin(f'https://{self.web_crawler.server}', attr[1])
                     if full_link not in self.web_crawler.links_visited:
                         self.web_crawler.links_queue.put(full_link)
@@ -37,35 +37,35 @@ class CustomHTMLParser(HTMLParser):
         if 'FLAG: ' in data:
             flag = data.split('FLAG: ')[1].strip()
             if flag not in self.web_crawler.flags_found or flag not in global_found_flags:
-                print(f"Flag Found: {flag}\n")
+                print(f"{flag}\n")
                 with open(os.path.join(os.path.dirname(__file__), 'secret_flags'), 'a') as f:
                     f.write(flag + '\n')
                 self.web_crawler.flags_found.append(flag)
                 global_found_flags.append(flag)
 
 
-# Web Crawler Class
+# Crawler instance
 class WebCrawler:
     def __init__(self, args):
         self.server = args.server
         self.port = args.port
         self.username = args.username
         self.password = args.password
-        self.csrftoken = None
-        self.sessionid = None
+        self.csrftoken = None 
+        self.sessionid = None  
         self.links_queue = queue.Queue()
         self.flags_found = []
         self.links_visited = set()
 
-    # Create SSL socket
-    def create_ssl_socket(self):
-        if not hasattr(self, 'ssl_socket'):
+    # Creates socket
+    def create_socket(self):
+        if not hasattr(self, 'socket'):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.ssl_socket = ssl.create_default_context().wrap_socket(sock, server_hostname=self.server)
-            self.ssl_socket.connect((self.server, self.port))
-        return self.ssl_socket
+            ssl_sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.server)
+            ssl_sock.connect((self.server, self.port))
+        return ssl_sock
 
-    # Run login and crawling tasks
+    # Runs login and the respective tasks each crawler needs and makes a socket for each. 
     def run(self):
         self.login()
         self.links_queue.put(ORIGIN_PATH)  # Start with the origin path
@@ -79,17 +79,20 @@ class WebCrawler:
         for thread in threads:  # Wait for all threads to complete
             thread.join()
 
-    # Worker thread function
+
+
+    # Runs a single run of a crawl, then grabs a new link from the queue 
     def worker(self):
         while True:
             try:
                 path = self.links_queue.get(timeout=5)  # Get a link to crawl
                 self.crawl(path)
                 self.links_queue.task_done()
+               ## print(f"Links in Queue: {self.links_queue.qsize()}, Links Visited: {len(self.links_visited)}")
             except queue.Empty:
                 return  # Exit if no more links to process
 
-    # Crawl a link and process found links or flags
+    # Go through a link and see what is found (links or flags)
     def crawl(self, path):
         if len(self.flags_found) >= 5:
             sys.exit(1)
@@ -97,17 +100,57 @@ class WebCrawler:
             return
         self.links_visited.add(path)
         try:
-            ssl_socket = self.create_ssl_socket()
-            self.send_GET(ssl_socket, path)
-            data = self.receive_data(ssl_socket)
-            self.handle_response(ssl_socket, data, path)
-            ssl_socket.close()
+            my_socket = self.create_socket()
+            self.send_get(my_socket, path)
+            data = self.receive_data(my_socket)
+            self.handle_response(my_socket, data, path)
+            my_socket.close()
         except Exception as e:
             print(f"Error crawling {path}: {e}")
 
-    # Send HTTP GET request
-    def send_GET(self, ssl_socket, path):
-        req = (
+    # Sends the HTTP login information with the username and password
+    def login(self, retry_count=3):
+        attempts = 0
+        while attempts < retry_count:
+            try:
+                my_socket = self.create_socket()
+                self.send_get(my_socket, LOGIN_PATH)
+                data = self.receive_data(my_socket)
+                csrf_token = self.get_csrf_token(data)
+
+                # Ensure csrf_token is fetched
+                while not csrf_token:
+                    data += self.receive_data(my_socket)
+                    csrf_token = self.get_csrf_token(data)
+
+                # Fetch cookies if needed
+                if not self.sessionid:
+                    self.get_cookies(data)
+
+                # Prepare and send POST request for login
+                post_data = f"username={self.username}&password={self.password}&csrfmiddlewaretoken={csrf_token}&next=/fakebook/"
+                self.send_post(my_socket, LOGIN_PATH, post_data)
+                data = self.receive_data(my_socket)
+                response_code = data.splitlines()[0].split(' ')[1]
+
+                # Check response code
+                if response_code == '200' or response_code == '302':
+                    self.get_cookies(data)
+                    my_socket.close()
+                    return True  # Login successful
+                else:
+                    attempts += 1
+                    time.sleep(1)  # Wait a bit before retrying
+            except Exception as e:
+                print(f"Error during login attempt: {e}")
+                attempts += 1
+                time.sleep(1)  # Wait a bit before retrying
+        print("Failed to login after several attempts.")
+        return False
+
+    # Sends a get call
+    def send_get(self, my_socket, path):
+        req = ( 
             f'GET {path} HTTP/1.1\r\n'
             f'Host: {self.server}:{self.port}\r\n'
             f'Connection: keep-alive\r\n'
@@ -115,10 +158,10 @@ class WebCrawler:
         if self.csrftoken and self.sessionid:
             req += f'Cookie: csrftoken={self.csrftoken}; sessionid={self.sessionid}; \r\n'
         req += '\r\n'
-        self.send_http(ssl_socket, req)
+        self.send_http(my_socket, req)
 
-    # Send HTTP POST request
-    def send_POST(self, ssl_socket, path, post_data):
+    # Sends a post call
+    def send_post(self, my_socket, path, post_data):
         post = (
             f'POST {path} HTTP/1.1\r\n'
             f'Host: {self.server}:{self.port}\r\n'
@@ -127,18 +170,14 @@ class WebCrawler:
             f'Cookie: csrftoken={self.csrftoken}; sessionid={self.sessionid}; \r\n\r\n'
             f'{post_data}\r\n'
         )
-        self.send_http(ssl_socket, post)
+        self.send_http(my_socket, post)
 
-    # Send HTTP message
-    def send_http(self, ssl_socket, msg):
-        ssl_socket.sendall(msg.encode('ascii'))
+    # recieves data and decodes it into a readable format
+    def receive_data(self, my_socket):
+        return my_socket.recv(4096).decode('ascii')
 
-    # Receive data from socket
-    def receive_data(self, ssl_socket):
-        return ssl_socket.recv(4096).decode('ascii')
-
-    # Handle various response codes
-    def handle_response(self, ssl_socket, response, path):
+    # Handle response
+    def handle_response(self, my_socket, response, path):
         try:
             response_code = response.splitlines()[0].split(' ')[1]
         except Exception:
@@ -157,82 +196,24 @@ class WebCrawler:
                 self.crawl(ORIGIN_PATH)
         elif response_code.startswith('5'):
             time.sleep(1)
-            self.send_GET(ssl_socket, path)
-            self.handle_response(ssl_socket, self.receive_data(ssl_socket), path)
+            self.send_get(my_socket, path)
+            self.handle_response(my_socket, self.receive_data(my_socket), path)
 
     '''
-    Search the page for flags and links.
+    Searches the page for flags and links.
     Params:
         response: The response to search.
-    '''
+    '''               
     def search_page(self, response):
         parser = CustomHTMLParser(self)
         parser.feed(response)
 
-    # Login to the server
-    def login(self, retry_count=3):
-        attempts = 0
-        while attempts < retry_count:
-            try:
-                ssl_socket = self.create_ssl_socket()
-                self.send_GET(ssl_socket, LOGIN_PATH)
-                data = self.receive_data(ssl_socket)
-                csrf_token = self.get_csrf_token(data)
-
-                # Ensure csrf_token is fetched
-                while not csrf_token:
-                    data += self.receive_data(ssl_socket)
-                    csrf_token = self.get_csrf_token(data)
-
-                # Fetch cookies if needed
-                if not self.sessionid:
-                    self.get_cookies(data)
-
-                # Prepare and send POST request for login
-                post_data = f"username={self.username}&password={self.password}&csrfmiddlewaretoken={csrf_token}&next=/example/"
-                self.send_POST(ssl_socket, LOGIN_PATH, post_data)
-                data = self.receive_data(ssl_socket)
-                response_code = data.splitlines()[0].split(' ')[1]
-
-                # Check response code
-                if
-                response_code == '200' or response_code == '302':
-                    self.get_cookies(data)
-                    ssl_socket.close()
-                    return True  # Login successful
-                else:
-                    attempts += 1
-                    time.sleep(1)  # Wait a bit before retrying
-            except Exception as e:
-                print(f"Error during login attempt: {e}")
-                attempts += 1
-                time.sleep(1)  # Wait a bit before retrying
-        print("Failed to login after several attempts.")
-        return False
-
-    # Get CSRF token for login
-    def get_csrf_token(self, response):
-        for line in response.split('\n'):
-            if 'csrfmiddlewaretoken' in line:
-                return line.split('value="')[1].split('"')[0]
-
-    # Get cookies
-    def get_cookies(self, response):
-        for line in response.splitlines():
-            if line.startswith('set-cookie:'):
-                cookie = line.split(';')[0].split(': ')[1]
-                key, value = cookie.split('=')
-                if key == 'csrftoken':
-                    self.csrftoken = value
-                elif key == 'sessionid':
-                    self.sessionid = value
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Crawl Example')
+    parser = argparse.ArgumentParser(description='crawl Fakebook')
     parser.add_argument('-s', dest="server", type=str, default=DEFAULT_SERVER, help="The server to crawl")
     parser.add_argument('-p', dest="port", type=int, default=DEFAULT_PORT, help="The port to use")
     parser.add_argument('username', type=str, help="The username to use")
     parser.add_argument('password', type=str, help="The password to use")
     args = parser.parse_args()
-    crawler = WebCrawler(args)
-    crawler.run()
+    sender = WebCrawler(args)
+    sender.run()
