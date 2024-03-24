@@ -79,31 +79,31 @@ class FakebookCrawler:
                 self.session_id = cookie.split("; ")[0].split("=")[1]
         assert self.session_id is not None, "ERROR: Failed to get Session ID after login."
 
-   def __parse_http_response(self, data):
-    """ Parse raw HTTP response. """
-    data = data.strip().split(2 * CRLF)
-    print("Data sections:", data)  # Add this line for debugging
-    response = {}
-    response[BODY] = data[-1] if len(data) > 1 else None
-    status_and_headers = data[0].split(CRLF)
+    def __parse_http_response(self, data):
+        """ Parse raw HTTP response. """
+        data = data.strip().split(2 * CRLF)
+        print("Data sections:", data)  # Add this line for debugging
+        response = {}
+        response[BODY] = data[-1] if len(data) > 1 else None
+        status_and_headers = data[0].split(CRLF)
 
-    print("Status and headers:", status_and_headers)  # Add this line for debugging
-    initial_response_line = status_and_headers[0]
-    print("Initial response line:", initial_response_line)  # Add this line for debugging
+        print("Status and headers:", status_and_headers)  # Add this line for debugging
+        initial_response_line = status_and_headers[0]
+        print("Initial response line:", initial_response_line)  # Add this line for debugging
 
-    status = int(initial_response_line.split(" ")[1])
-    response[STATUS] = status
-    response[HEADERS] = {}
-    response[COOKIES] = []
-    headers = status_and_headers[1:]
-    for header in headers:
-        key, value = header.split(": ")
-        if key == "Set-Cookie":
-            response[COOKIES].append(value)
-        else:
-            response[HEADERS][key] = value
+        status = int(initial_response_line.split(" ")[1])
+        response[STATUS] = status
+        response[HEADERS] = {}
+        response[COOKIES] = []
+        headers = status_and_headers[1:]
+        for header in headers:
+            key, value = header.split(": ")
+            if key == "Set-Cookie":
+                response[COOKIES].append(value)
+            else:
+                response[HEADERS][key] = value
 
-    return response
+        return response
 
 
     def __send_request(self, request):
@@ -218,3 +218,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
