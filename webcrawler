@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+
+import socket
+import sys
+
+from html.parser import HTMLParser
+from urllib.parse import urlparse
+
+##########################################################################
+
+HOST = "www.3700.network"
+PORT = 443
+BUFFER = 4096
+CRLF = "\r\n"
+
+# Internal HTTP Response Parse Fields
+BODY = "body"
+STATUS = "status"
+HEADERS = "headers"
+COOKIES = "cookies"
+
+# HTTP Status Codes
+SUCCESS = 200
+MOVED = 301
+REDIRECT = 302
+FORBIDDEN = 403
+NOT_FOUND = 404
+ERROR = 500
+
+##########################################################################
+
+socket.setdefaulttimeout(30)
+
+class FakebookHTMLParser(HTMLParser):
+
+    def __init__(self):
+        HTMLParser.__init__(self)
+        self.secret_flags = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "h3":
+            for attr in attrs:
+                if attr[0] == "class" and attr[1] == "secret_flag":
+                    self.secret_flag_found = True
+
+    def handle_data(self, data):
+        if getattr(self, "secret_flag_found", False):
+            self.secret_flags.append(data)
+            del self.secret_flag_found
+
+class FakebookCrawler:
+
+    def __init__(self, username, password, server=HOST, port=PORT):
+        self.username = username
+        self.password = password
+        self.server = server
+        self.port = port
+        self.csrf_token = None
+        self.session_id = None
+        self.__login()
+
+    def __login(self):
+        """ Log in to Fakebook and store CSRF and session tokens. """
+        login_url = f"https://{self.server}:{self.port}/accounts/login/?next=/fakebook/"
+        get_login_page_response = self.__get(login_url)
+
+        # Get CSRF token cookie.
+        for cookie in get_login_page_response[COOKIES]:
+            if "csrftoken" in cookie:
+                self.csrf_token = cookie.split("; ")[0].split("=")[1]
+        assert self.csrf_token is not None, "ERROR: Failed to get CSRF token from login page."
+
+        # Log in and get session cookie.
+        login_content = f"username={self.username}&password={self.password}&csrfmiddlewaretoken={self.csrf_token}&next="
+        post_login_page_response = self.__post(login_url, login_content)
+
+        for cookie in post_login_page_response[COOKIES]:
+            if "sessionid" in cookie:
+                self.session_id = cookie.split("; ")[0].split("=")[1]
+        assert self.session_id is not None, "ERROR: Failed to get Session ID after login."
+
+    def __parse_http_response(self, data):
+        """ Parse raw HTTP response. """
+        data = data.strip().split(2 * CRLF)
+        response = {}
+        response[BODY] = data[-1] if len(data) > 1 else None
+        status_and_headers = data[0].split(CRLF)
+
+        initial_response_line = status_and_headers[0]
+        status = int(initial_response_line.split(" ")[1])
+        response[STATUS] = status
+
+        response[HEADERS] = {}
+        response[COOKIES] = []
+        headers = status_and_headers[1:]
+        for header in headers:
+            key, value = header.split(": ")
+            if key == "Set-Cookie":
+                response[COOKIES].append(value)
+            else:
+                response[HEADERS][key] = value
+
+        return response
+
+    def __send_request(self, request):
+        """ Send HTTP request and return parsed response. """
+        with socket.create_connection((self.server, self.port)) as sock:
+            sock.sendall(request.encode())
+            response_data = sock.recv(BUFFER).decode()
+        return self.__parse_http_response(response_data)
+
+    def __get(self, url):
+        """ Send a HTTP/1.1 GET request. """
+        assert self.server in url, f"ERROR: Crawler should only traverse URLs that point to pages on {self.server}"
+        url = urlparse(url)
+
+        # Create HTTP initial request line and headers.
+        initial_request_line = f"GET {url.path} HTTP/1.1{CRLF}"
+        host = f"Host: {self.server}:{self.port}{CRLF}"
+        cookie_header = f"Cookie: csrftoken={self.csrf_token}; sessionid={self.session_id}{CRLF}"
+        request = f"{initial_request_line}{host}{cookie_header}{CRLF}"
+
+        return self.__send_request(request)
+
+    def __post(self, url, content):
+        """ Send a HTTP/1.1 POST request. """
+        assert self.server in url, f"ERROR: Crawler should only traverse URLs that point to pages on {self.server}"
+        url = urlparse(url)
+
+        # Create HTTP initial request line and headers.
+        initial_request_line = f"POST {url.path} HTTP/1.1{CRLF}"
+        host = f"Host: {self.server}:{self.port}{CRLF}"
+        from_line = f"From: {self.username}@husky.neu.edu{CRLF}"
+        user_agent = "User-Agent: cs3700-webcrawler/1.0\r\n"
+        content_type = "Content-Type: application/x-www-form-urlencoded\r\n"
+        content_length = f"Content-Length: {len(content)}{CRLF}"
+        cookie_header = f"Cookie: csrftoken={self.csrf_token}; sessionid={self.session_id}{CRLF}"
+        request = f"{initial_request_line}{host}{from_line}{user_agent}{content_type}{content_length}{cookie_header}{CRLF}{CRLF}{content}"
+
+        return self.__send_request(request)
+
+    def crawl(self):
+        """ Crawl Fakebook and return secret flags. """
+        secret_flags = []
+        root_page_url = f"https://{self.server}:{self.port}/fakebook/"
+        unvisited_pages = deque([root_page_url])
+        visited_pages = set()
+
+        while unvisited_pages and len(secret_flags) < 5:
+            next_page_url = unvisited_pages.popleft()
+
+            try:
+                get_page_response = self.__get(next_page_url)
+                visited_pages.add(next_page_url)
+
+                status = get_page_response[STATUS]
+                if status == SUCCESS:
+                    html = get_page_response[BODY]
+                    html_parser = FakebookHTMLParser()
+                    html_parser.feed(html)
+
+                    secret_flags.extend(html_parser.secret_flags)
+
+                    links = html_parser.links
+                    filtered_links = [link for link in links if "/fakebook/" in link]
+                    for link in filtered_links:
+                        link_url = f"https://{self.server}:{self.port}{link}"
+                        if link_url not in visited_pages and link_url not in unvisited_pages:
+                            unvisited_pages.append(link_url)
+                elif status in [MOVED, REDIRECT]:
+                    move_or_redirect_url = get_page_response[HEADERS]["Location"]
+                    unvisited_pages.appendleft(move_or_redirect_url)
+            except socket.timeout:
+                print("ERROR: Socket timeout.")
+                break
+
+        return secret_flags[:5]
+
+def main():
+    if len(sys.argv) < 3:
+        print("Usage: ./webcrawler [-s server] [-p port] <username> <password>")
+        sys.exit(1)
+
+    server = HOST
+    port = PORT
+
+    # Parse command line arguments
+    if "-s" in sys.argv:
+        try:
+            index = sys.argv.index("-s")
+            server = sys.argv[index + 1]
+        except IndexError:
+            print("ERROR: Server not provided after -s option.")
+            sys.exit(1)
+
+    if "-p" in sys.argv:
+        try:
+            index = sys.argv.index("-p")
+            port = int(sys.argv[index + 1])
+        except (IndexError, ValueError):
+            print("ERROR: Port not provided after -p option.")
+            sys.exit(1)
+
+    username = sys.argv[-2]
+    password = sys.argv[-1]
+
+    crawler = FakebookCrawler(username, password, server, port)
+    try:
+        secret_flags = crawler.crawl()
+        for secret_flag in secret_flags:
+            print(secret_flag)
+    except Exception as e:
+        print(f"ERROR: {str(e)}")
+
+if __name__ == "__main__":
+    main()
