@@ -105,7 +105,6 @@ class FakebookCrawler:
 
         return response
 
-
     def __send_request(self, request):
         """ Send HTTP request and return parsed response. """
         with socket.create_connection((self.server, self.port)) as sock:
