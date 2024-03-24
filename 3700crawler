@@ -86,7 +86,7 @@ class Crawler:
         while True:
             try:
                 path = self.links_queue.get(timeout=5)  # Get a link to crawl
-                self.crawl(path)
+                threading.Thread(target=self.crawl, args=(path,)).start()
                 self.links_queue.task_done()
                ## print(f"Links in Queue: {self.links_queue.qsize()}, Links Visited: {len(self.links_visited)}")
             except queue.Empty:
