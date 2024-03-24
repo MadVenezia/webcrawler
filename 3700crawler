@@ -20,32 +20,32 @@ ORIGIN_PATH = "/fakebook/"
 global_found_flags = []
 
 # HTMLParser
-class CustomHTMLParser(HTMLParser):
-    def __init__(self, web_crawler):
+class MyHTMLParser(HTMLParser):
+    def __init__(self, crawler):
         super().__init__()
-        self.web_crawler = web_crawler
+        self.crawler = crawler
 
     def handle_starttag(self, tag, attrs):
         if tag == "a":
             for attr in attrs:
                 if attr[0] == 'href' and attr[1].startswith("/fakebook/"):
-                    full_link = urljoin(f'https://{self.web_crawler.server}', attr[1])
-                    if full_link not in self.web_crawler.links_visited:
-                        self.web_crawler.links_queue.put(full_link)
+                    full_link = urljoin(f'https://{self.crawler.server}', attr[1])
+                    if full_link not in self.crawler.links_visited:
+                        self.crawler.links_queue.put(full_link)
 
     def handle_data(self, data):
         if 'FLAG: ' in data:
             flag = data.split('FLAG: ')[1].strip()
-            if flag not in self.web_crawler.flags_found or flag not in global_found_flags:
+            if flag not in self.crawler.flags_found or flag not in global_found_flags:
                 print(f"{flag}\n")
                 with open(os.path.join(os.path.dirname(__file__), 'secret_flags'), 'a') as f:
                     f.write(flag + '\n')
-                self.web_crawler.flags_found.append(flag)
+                self.crawler.flags_found.append(flag)
                 global_found_flags.append(flag)
 
 
 # Crawler instance
-class WebCrawler:
+class Crawler:
     def __init__(self, args):
         self.server = args.server
         self.port = args.port
@@ -100,11 +100,11 @@ class WebCrawler:
             return
         self.links_visited.add(path)
         try:
-            my_socket = self.create_socket()
-            self.send_get(my_socket, path)
-            data = self.receive_data(my_socket)
-            self.handle_response(my_socket, data, path)
-            my_socket.close()
+            mysocket = self.create_socket()
+            self.sendGET(mysocket, path)
+            data = self.receiveData(mysocket)
+            self.handleResponse(mysocket, data, path)
+            mysocket.close()
         except Exception as e:
             print(f"Error crawling {path}: {e}")
 
@@ -113,30 +113,30 @@ class WebCrawler:
         attempts = 0
         while attempts < retry_count:
             try:
-                my_socket = self.create_socket()
-                self.send_get(my_socket, LOGIN_PATH)
-                data = self.receive_data(my_socket)
-                csrf_token = self.get_csrf_token(data)
+                mysocket = self.create_socket()
+                self.sendGET(mysocket, LOGIN_PATH)
+                data = self.receiveData(mysocket)
+                csrfmiddlewaretoken = self.getcsrfmiddlewaretoken(data)
 
-                # Ensure csrf_token is fetched
-                while not csrf_token:
-                    data += self.receive_data(my_socket)
-                    csrf_token = self.get_csrf_token(data)
+                # Ensure csrfmiddlewaretoken is fetched
+                while not csrfmiddlewaretoken:
+                    data += self.receiveData(mysocket)
+                    csrfmiddlewaretoken = self.getcsrfmiddlewaretoken(data)
 
                 # Fetch cookies if needed
                 if not self.sessionid:
-                    self.get_cookies(data)
+                    self.getCookies(data)
 
                 # Prepare and send POST request for login
-                post_data = f"username={self.username}&password={self.password}&csrfmiddlewaretoken={csrf_token}&next=/fakebook/"
-                self.send_post(my_socket, LOGIN_PATH, post_data)
-                data = self.receive_data(my_socket)
+                post_data = f"username={self.username}&password={self.password}&csrfmiddlewaretoken={csrfmiddlewaretoken}&next=/fakebook/"
+                self.sendPOST(mysocket, LOGIN_PATH, post_data)
+                data = self.receiveData(mysocket)
                 response_code = data.splitlines()[0].split(' ')[1]
 
                 # Check response code
                 if response_code == '200' or response_code == '302':
-                    self.get_cookies(data)
-                    my_socket.close()
+                    self.getCookies(data)
+                    mysocket.close()
                     return True  # Login successful
                 else:
                     attempts += 1
@@ -148,8 +148,29 @@ class WebCrawler:
         print("Failed to login after several attempts.")
         return False
 
+    # Function to send an HTTP msg
+    def sendHTTP(self, mysocket, msg):
+        mysocket.sendall(msg.encode('ascii'))
+
+    # get csrf token for login
+    def getcsrfmiddlewaretoken(self, response):
+        for line in response.split('\n'):
+            if 'csrfmiddlewaretoken' in line:
+                return line.split('value="')[1].split('"')[0]
+
+    # get cookies (yum)
+    def getCookies(self, response):
+        for line in response.splitlines():
+            if line.startswith('set-cookie:'):
+                cookie = line.split(';')[0].split(': ')[1]
+                key, value = cookie.split('=')
+                if key == 'csrftoken':
+                    self.csrftoken = value
+                elif key == 'sessionid':
+                    self.sessionid = value
+
     # Sends a get call
-    def send_get(self, my_socket, path):
+    def sendGET(self, mysocket, path):
         req = ( 
             f'GET {path} HTTP/1.1\r\n'
             f'Host: {self.server}:{self.port}\r\n'
@@ -158,32 +179,32 @@ class WebCrawler:
         if self.csrftoken and self.sessionid:
             req += f'Cookie: csrftoken={self.csrftoken}; sessionid={self.sessionid}; \r\n'
         req += '\r\n'
-        self.send_http(my_socket, req)
+        self.sendHTTP(mysocket, req)
 
     # Sends a post call
-    def send_post(self, my_socket, path, post_data):
+    def sendPOST(self, mysocket, path, postData):
         post = (
             f'POST {path} HTTP/1.1\r\n'
             f'Host: {self.server}:{self.port}\r\n'
-            f'Content-Length: {len(post_data)}\r\n'
+            f'Content-Length: {len(postData)}\r\n'
             f'Content-Type: application/x-www-form-urlencoded\r\n'
             f'Cookie: csrftoken={self.csrftoken}; sessionid={self.sessionid}; \r\n\r\n'
-            f'{post_data}\r\n'
+            f'{postData}\r\n'
         )
-        self.send_http(my_socket, post)
+        self.sendHTTP(mysocket, post)
 
     # recieves data and decodes it into a readable format
-    def receive_data(self, my_socket):
-        return my_socket.recv(4096).decode('ascii')
+    def receiveData(self, mysocket):
+        return mysocket.recv(4096).decode('ascii')
 
-    # Handle response
-    def handle_response(self, my_socket, response, path):
+    # Switch statement for handling various response codes
+    def handleResponse(self, mysocket, response, path):
         try:
             response_code = response.splitlines()[0].split(' ')[1]
         except Exception:
             return
         if response_code == '200':
-            self.search_page(response)
+            self.searchPage(response)
         elif response_code == '302':
             _, _, location = response.partition('location: ')
             location, _, _ = location.partition('\r\n')
@@ -196,16 +217,16 @@ class WebCrawler:
                 self.crawl(ORIGIN_PATH)
         elif response_code.startswith('5'):
             time.sleep(1)
-            self.send_get(my_socket, path)
-            self.handle_response(my_socket, self.receive_data(my_socket), path)
+            self.sendGET(mysocket, path)
+            self.handleResponse(mysocket, self.receiveData(mysocket), path)
 
     '''
     Searches the page for flags and links.
     Params:
         response: The response to search.
     '''               
-    def search_page(self, response):
-        parser = CustomHTMLParser(self)
+    def searchPage(self, response):
+        parser = MyHTMLParser(self)
         parser.feed(response)
 
 if __name__ == "__main__":
@@ -215,5 +236,5 @@ if __name__ == "__main__":
     parser.add_argument('username', type=str, help="The username to use")
     parser.add_argument('password', type=str, help="The password to use")
     args = parser.parse_args()
-    sender = WebCrawler(args)
+    sender = Crawler(args)
     sender.run()
