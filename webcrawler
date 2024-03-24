@@ -97,11 +97,11 @@ class FakebookCrawler:
         response[COOKIES] = []
         headers = status_and_headers[1:]
         for header in headers:
-            key, value = header.split(": ")
-            if key == "Set-Cookie":
-                response[COOKIES].append(value)
-            else:
-                response[HEADERS][key] = value
+         key, value = header.split(": ")
+         if key == "Set-Cookie":
+             response[COOKIES].append(value)
+         else:
+             response[HEADERS][key] = value
 
         return response
 
@@ -110,6 +110,7 @@ class FakebookCrawler:
         with socket.create_connection((self.server, self.port)) as sock:
             sock.sendall(request.encode())
             response_data = sock.recv(BUFFER).decode()
+            print("Received response:", response_data)  # Add this line for debugging
         return self.__parse_http_response(response_data)
 
     def __get(self, url):
@@ -217,4 +218,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
