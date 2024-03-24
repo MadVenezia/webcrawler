@@ -81,16 +81,18 @@ class FakebookCrawler:
 
    def __parse_http_response(self, data):
     """ Parse raw HTTP response. """
-    data = data.split(2 * CRLF)
-    data = [section.strip() for section in data]  # Strip each section individually
+    data = data.strip().split(2 * CRLF)
+    print("Data sections:", data)  # Add this line for debugging
     response = {}
     response[BODY] = data[-1] if len(data) > 1 else None
     status_and_headers = data[0].split(CRLF)
 
+    print("Status and headers:", status_and_headers)  # Add this line for debugging
     initial_response_line = status_and_headers[0]
+    print("Initial response line:", initial_response_line)  # Add this line for debugging
+
     status = int(initial_response_line.split(" ")[1])
     response[STATUS] = status
-
     response[HEADERS] = {}
     response[COOKIES] = []
     headers = status_and_headers[1:]
