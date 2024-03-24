@@ -81,7 +81,7 @@ class FakebookCrawler:
 
     def __parse_http_response(self, data):
         """ Parse raw HTTP response. """
-        data = data.strip().split(2 * CRLF)
+        data = [part.strip() for part in data.split(2 * CRLF)]
         print("Data sections:", data)  # Add this line for debugging
         response = {}
         response[BODY] = data[-1] if len(data) > 1 else None
