@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 
-
 import argparse, socket, ssl, urllib.parse, re, gzip
 
 DEFAULT_SERVER = "www.3700.network"
 DEFAULT_PORT = 443
 
-class Crawler:
+class WebCrawler:
     def __init__(self, args):
         self.server = args.server
         self.port = args.port
@@ -81,7 +80,7 @@ class Crawler:
         return request
 
 
-    def read(self) -> str:
+    def read_data(self) -> str:
         """Reads data in from over the socket.
 
         Returns:
@@ -120,7 +119,7 @@ class Crawler:
         return data
 
 
-    def make_sock(self) -> None:
+    def establish_socket(self) -> None:
         """Creates a TLS-wrapped socket"""
         context = ssl.SSLContext(ssl.PROTOCOL_TLS)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -128,7 +127,7 @@ class Crawler:
         self.sock.connect((self.server, self.port))
 
 
-    def collect_urls(self, html: str) -> set:
+    def extract_urls(self, html: str) -> set:
         """Traverses the given html and adds any unexplored urls to 
         a list to traverse.
 
@@ -151,7 +150,7 @@ class Crawler:
         return urls
 
 
-    def find_flags(self, url: str, html: str) -> None:
+    def find_secret_flags(self, url: str, html: str) -> None:
         """Attempts to find secret flags within the given html.
 
         Args:
@@ -164,7 +163,7 @@ class Crawler:
         self.flags.update(flags)
         
 
-    def handle_codes(self, data: str) -> int:
+    def check_response_codes(self, data: str) -> int:
         """Pulls the response code from the given page
 
         Args:
@@ -185,7 +184,7 @@ class Crawler:
         return -1
 
 
-    def crawl(self) -> None:
+    def traverse(self) -> None:
         """Recursively crawls through each page of discovered but unexplored 
         urls, searching for secret flags and finding more urls to explore.
         """
@@ -204,10 +203,10 @@ class Crawler:
                 self.sock.send(get.encode('ascii'))
                 
                 # find any flags
-                html = self.read()
+                html = self.read_data()
 
                 # check codes
-                code = self.handle_codes(html)
+                code = self.check_response_codes(html)
 
                 if code in {200, 403, 404, 302}:
                     break
@@ -219,11 +218,11 @@ class Crawler:
             # drop the current url and move on
             if code == 404 or code == 403:
                 self.explored.add(url)
-                new_urls.update(self.collect_urls(html))
+                new_urls.update(self.extract_urls(html))
                 
                 continue
             
-            self.find_flags(url, html)
+            self.find_secret_flags(url, html)
 
             # all flags found, end
             if len(self.flags) == 5:
@@ -231,17 +230,17 @@ class Crawler:
 
             # find new urls + update urls
             self.explored.add(url)
-            new_urls.update(self.collect_urls(html))
+            new_urls.update(self.extract_urls(html))
 
         # refresh list of urls left to explore
         self.to_explore = new_urls
         
         # recursively explore
-        self.crawl()
+        self.traverse()
         
 
-    def run(self):
-        self.make_sock()
+    def run_crawler(self):
+        self.establish_socket()
         
         # make request to see login page
         path = "/accounts/login/?next=fakebook/"
@@ -249,7 +248,7 @@ class Crawler:
         
         # get csrf token and session id
         self.sock.send(request.encode('ascii'))
-        data = self.read()
+        data = self.read_data()
         self.find_tokens(data)
 
         # send POST login request
@@ -266,12 +265,12 @@ class Crawler:
         get = f"GET {home} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_id};\r\nConnection: keep-alive\r\n\r\n"
 
         self.sock.send(get.encode('ascii'))
-        data = self.read()
+        data = self.read_data()
 
         # get initial batch of urls + start traversing
-        home_page_urls = self.collect_urls(data)
+        home_page_urls = self.extract_urls(data)
         self.to_explore.update(home_page_urls)
-        self.crawl()
+        self.traverse()
 
         # print flags found
         for flag in self.flags:
@@ -285,5 +284,6 @@ if __name__ == "__main__":
     parser.add_argument('username', type=str, help="The username to use")
     parser.add_argument('password', type=str, help="The password to use")
     args = parser.parse_args()
-    sender = Crawler(args)
-    sender.run()
+    sender = WebCrawler(args)
+    sender.run_crawler()
+                                             
