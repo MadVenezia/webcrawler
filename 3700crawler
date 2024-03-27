@@ -100,6 +100,7 @@ class CustomWebCrawler:
             str: Decoded data.
         """
         data = b""
+
         while True:
             chunk = self.ssl_socket.recv(256)
             data += chunk
@@ -223,16 +224,10 @@ class CustomWebCrawler:
         """
         Runs the custom web crawler.
         """
-        self.establish_ssl_socket()
+        self.establish_ssl_socket()  # Initialize SSL socket first
 
-        login_request = f"{self.server_address}\r\nAccept-Encoding: gzip\r\nConnection: keep-alive\r\n\r\n"
-
-        self.ssl_socket.send(login_request.encode('ascii'))
-        data = self.read_response_data()
-        self.retrieve_tokens(data)
-
-        post_data = self.perform_login()
-        post_data = post_data.encode('ascii')
+        login_request = self.perform_login()  # Now perform login using the established socket
+        post_data = login_request.encode('ascii')
         self.ssl_socket.send(post_data)
 
         response_data = self.read_response_data()
