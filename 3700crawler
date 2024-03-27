@@ -31,13 +31,7 @@ class WebCrawler:
 
 
     def find_tokens(self, data: str) -> tuple:
-        """Finds the CSRF tokens and session id to be used for logging in.
-        
-        Args:
-            data: the data received as a response to a request
-        Returns:
-            a tuple of the tokens and session id found
-        """
+
         data_headers = data.split('\n')
 
         # gets the csrf token and session id
@@ -62,11 +56,7 @@ class WebCrawler:
 
 
     def login(self) -> str:
-        """Makes a POST request to login to Fakebook.
-        
-        Returns:
-            the POST request to be made
-        """
+
         path = "/accounts/login/"
         params = {
                 "username": self.username,
@@ -80,24 +70,19 @@ class WebCrawler:
         length = len(body)
         header = f"POST {path} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nContent-Type: application/x-www-form-urlencoded\r\nCookie: sessionid={self.session_id}; csrftoken={self.csrf_token}\r\nConnection: keep-alive\r\nContent-Length: {length}\r\n\r\n"
 
-        # create the full header
+       
         request = header + body
         return request
 
 
     def read_data(self) -> str:
-        """Reads data in from over the socket.
-
-        Returns:
-            the string of data read.
-        """
-        data = b""
+       
         while True:
             chunk = self.sock.recv(256)
             data += chunk
            
             if not chunk: break
-            # chatgpt recommended this for finding the end of a zipped file
+           
             elif data[-2:] == b'\x00\x00':
                 header, body = data.split(b'\r\n\r\n', 1)
                 break
@@ -108,11 +93,7 @@ class WebCrawler:
 
 
     def read_header(self) -> str:
-        """Reads data in from over the socket. Only reads the header
-
-        Returns:
-            the string of data read.
-        """
+        
         data = ""
         while True:
             chunk = self.sock.recv(256).decode('ascii')
@@ -125,7 +106,7 @@ class WebCrawler:
 
 
     def establish_socket(self) -> None:
-        """Creates a TLS-wrapped socket"""
+       
         context = ssl.SSLContext(ssl.PROTOCOL_TLS)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock = context.wrap_socket(sock, server_hostname=self.server)
@@ -133,19 +114,10 @@ class WebCrawler:
 
 
     def extract_urls(self, html: str) -> set:
-        """Traverses the given html and adds any unexplored urls to 
-        a list to traverse.
-
-        Args:
-            html: the html to traverse for urls
-        Returns:
-            a set of unexplored urls
-        """
-        # chatgpt regex pattern for finding 'a' tags
+       
         pattern = r'<a\s.*?href="(.*?)".*?>(.*?)<\/a>'
         values = re.findall(pattern, html)
         
-        # only get urls
         urls = set()
         for value in values:
             url = value[0]
@@ -156,26 +128,14 @@ class WebCrawler:
 
 
     def find_secret_flags(self, url: str, html: str) -> None:
-        """Attempts to find secret flags within the given html.
-
-        Args:
-            url: the url of the page being traversed
-            html: the html of the page to be searched
-        """
-        # chatpt regex pattern for flags
+       
         pattern = r'<h3\s+class=\'secret_flag\'\s+style="color:red">FLAG:\s+([A-Za-z0-9]{64})<\/h3>'
         flags = re.findall(pattern, html)
         self.flags.update(flags)
         
 
     def check_response_codes(self, data: str) -> int:
-        """Pulls the response code from the given page
-
-        Args:
-            data: the entire server response as a string
-        Returns:
-            the found response code or -1
-        """
+       
         data_headers = data.split('\n')
 
         for header in data_headers:
@@ -190,27 +150,24 @@ class WebCrawler:
 
 
     def traverse(self) -> None:
-        """Recursively crawls through each page of discovered but unexplored 
-        urls, searching for secret flags and finding more urls to explore.
-        """
-        # nothing left to crawl
+       
         if len(self.to_explore) == 0:
             return 
         
-        # things left to crawl
+       
         new_urls = set()
         for url in self.to_explore:
-            # go to url
+           
             get = f"GET {url} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_id};\r\nConnection: keep-alive\r\n\r\n"
 
-            # send until a 200 code is received
+            
             while True:
                 self.sock.send(get.encode('ascii'))
                 
-                # find any flags
+              
                 html = self.read_data()
 
-                # check codes
+              
                 code = self.check_response_codes(html)
 
                 if code in {200, 403, 404, 302}:
@@ -220,7 +177,6 @@ class WebCrawler:
                 else:
                     raise ValueError(f"ERROR: Unexpected response code {code}")
 
-            # drop the current url and move on
             if code == 404 or code == 403:
                 self.explored.add(url)
                 new_urls.update(self.extract_urls(html))
@@ -229,34 +185,29 @@ class WebCrawler:
             
             self.find_secret_flags(url, html)
 
-            # all flags found, end
             if len(self.flags) == 5:
                 return
 
-            # find new urls + update urls
             self.explored.add(url)
             new_urls.update(self.extract_urls(html))
 
-        # refresh list of urls left to explore
         self.to_explore = new_urls
         
-        # recursively explore
         self.traverse()
         
 
     def run_crawler(self):
         self.establish_socket()
         
-        # make request to see login page
         path = "/accounts/login/?next=fakebook/"
         request = f"GET {path} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nConnection: keep-alive\r\n\r\n"
         
-        # get csrf token and session id
+        
         self.sock.send(request.encode('ascii'))
         data = self.read_data()
         self.find_tokens(data)
 
-        # send POST login request
+    
         post = self.login()
         post = post.encode('ascii')
         self.sock.send(post)
@@ -265,19 +216,18 @@ class WebCrawler:
             
         self.find_tokens(data)
 
-        # get request to fakebook homepage
+
         home = "/fakebook/"
         get = f"GET {home} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_id};\r\nConnection: keep-alive\r\n\r\n"
 
         self.sock.send(get.encode('ascii'))
         data = self.read_data()
 
-        # get initial batch of urls + start traversing
+ 
         home_page_urls = self.extract_urls(data)
         self.to_explore.update(home_page_urls)
         self.traverse()
 
-        # print flags found
         for flag in self.flags:
             print(flag)
 
