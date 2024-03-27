@@ -2,8 +2,8 @@
 
 import argparse
 import socket
-import ssl
-import urllib.parse
+import ssl 
+import urllib.parse 
 import re
 import gzip
 
@@ -30,7 +30,7 @@ class WebCrawler:
         self.flags = set()
 
 
-    def locate_tokens(self, data: str) -> tuple:
+    def find_tokens(self, data: str) -> tuple:
         """Finds the CSRF tokens and session id to be used for logging in.
         
         Args:
@@ -61,7 +61,7 @@ class WebCrawler:
         return self.csrf_token, self.session_id, self.middleware_token
 
 
-    def authenticate(self) -> str:
+    def login(self) -> str:
         """Makes a POST request to login to Fakebook.
         
         Returns:
@@ -85,7 +85,7 @@ class WebCrawler:
         return request
 
 
-    def receive_data(self) -> str:
+    def read_data(self) -> str:
         """Reads data in from over the socket.
 
         Returns:
@@ -107,7 +107,7 @@ class WebCrawler:
         return data.decode('ascii')
 
 
-    def receive_header(self) -> str:
+    def read_header(self) -> str:
         """Reads data in from over the socket. Only reads the header
 
         Returns:
@@ -124,7 +124,7 @@ class WebCrawler:
         return data
 
 
-    def establish_connection(self) -> None:
+    def establish_socket(self) -> None:
         """Creates a TLS-wrapped socket"""
         context = ssl.SSLContext(ssl.PROTOCOL_TLS)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -132,7 +132,7 @@ class WebCrawler:
         self.sock.connect((self.server, self.port))
 
 
-    def fetch_urls(self, html: str) -> set:
+    def extract_urls(self, html: str) -> set:
         """Traverses the given html and adds any unexplored urls to 
         a list to traverse.
 
@@ -155,7 +155,7 @@ class WebCrawler:
         return urls
 
 
-    def find_flags(self, url: str, html: str) -> None:
+    def find_secret_flags(self, url: str, html: str) -> None:
         """Attempts to find secret flags within the given html.
 
         Args:
@@ -168,7 +168,7 @@ class WebCrawler:
         self.flags.update(flags)
         
 
-    def inspect_response_codes(self, data: str) -> int:
+    def check_response_codes(self, data: str) -> int:
         """Pulls the response code from the given page
 
         Args:
@@ -189,7 +189,7 @@ class WebCrawler:
         return -1
 
 
-    def explore(self) -> None:
+    def traverse(self) -> None:
         """Recursively crawls through each page of discovered but unexplored 
         urls, searching for secret flags and finding more urls to explore.
         """
@@ -208,27 +208,26 @@ class WebCrawler:
                 self.sock.send(get.encode('ascii'))
                 
                 # find any flags
-                html = self.receive_data()
+                html = self.read_data()
 
                 # check codes
-                code = self.inspect_response_codes(html)
+                code = self.check_response_codes(html)
 
                 if code in {200, 403, 404, 302}:
                     break
                 elif code == 503:
                     continue
                 else:
-                    raise ValueError(f"ERROR: Unexpected response code {code
-}
+                    raise ValueError(f"ERROR: Unexpected response code {code}")
 
             # drop the current url and move on
             if code == 404 or code == 403:
                 self.explored.add(url)
-                new_urls.update(self.fetch_urls(html))
+                new_urls.update(self.extract_urls(html))
                 
                 continue
             
-            self.find_flags(url, html)
+            self.find_secret_flags(url, html)
 
             # all flags found, end
             if len(self.flags) == 5:
@@ -236,17 +235,17 @@ class WebCrawler:
 
             # find new urls + update urls
             self.explored.add(url)
-            new_urls.update(self.fetch_urls(html))
+            new_urls.update(self.extract_urls(html))
 
         # refresh list of urls left to explore
         self.to_explore = new_urls
         
         # recursively explore
-        self.explore()
+        self.traverse()
         
 
-    def start_crawler(self):
-        self.establish_connection()
+    def run_crawler(self):
+        self.establish_socket()
         
         # make request to see login page
         path = "/accounts/login/?next=fakebook/"
@@ -254,29 +253,29 @@ class WebCrawler:
         
         # get csrf token and session id
         self.sock.send(request.encode('ascii'))
-        data = self.receive_data()
-        self.locate_tokens(data)
+        data = self.read_data()
+        self.find_tokens(data)
 
         # send POST login request
-        post = self.authenticate()
+        post = self.login()
         post = post.encode('ascii')
         self.sock.send(post)
 
-        data = self.receive_header()
+        data = self.read_header()
             
-        self.locate_tokens(data)
+        self.find_tokens(data)
 
         # get request to fakebook homepage
         home = "/fakebook/"
         get = f"GET {home} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_id};\r\nConnection: keep-alive\r\n\r\n"
 
         self.sock.send(get.encode('ascii'))
-        data = self.receive_data()
+        data = self.read_data()
 
         # get initial batch of urls + start traversing
-        home_page_urls = self.fetch_urls(data)
+        home_page_urls = self.extract_urls(data)
         self.to_explore.update(home_page_urls)
-        self.explore()
+        self.traverse()
 
         # print flags found
         for flag in self.flags:
@@ -290,5 +289,6 @@ if __name__ == "__main__":
     parser.add_argument('username', type=str, help="The username to use")
     parser.add_argument('password', type=str, help="The password to use")
     args = parser.parse_args()
-    crawler = WebCrawler(args)
-    crawler.start_crawler()
+    sender = WebCrawler(args)
+    sender.run_crawler()
+                                
