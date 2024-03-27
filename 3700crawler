@@ -18,16 +18,20 @@ class WebCrawler:
         self.username = args.username
         self.password = args.password
 
-        self.token = None
-        self.cookie = None
-        self.sock = None
+       self.token = None  # Stores authentication token
+        self.cookie = None  # Stores cookie information
+        self.sock = None    # Socket object for connection
 
+        # Tokens and session information
         self.csrf_token = None
         self.session_id = None
         self.middleware_token = None
 
+        # URLs that have been explored and yet to explore
         self.explored = {'/', '/accounts/logout/'}
         self.to_explore = set()
+
+        # Flags found during traversal
         self.flags = set()
 
 
@@ -39,25 +43,31 @@ class WebCrawler:
         Returns:
             A tuple containing the found tokens and session id.
         """
+        # Split server response into headers
         data_headers = data.split('\n')
 
+        # Loop through headers to find tokens
         for header in data_headers:
             if 'set-cookie: csrftoken=' in header:
                 try:
+                    # Extract and clean CSRF token
                     self.csrf_token = header.split('csrftoken=')[1].split(';')[0].strip()
                 except ValueError:
                     return
             elif 'set-cookie: sessionid=' in header:
                 try:
+                    # Extract and clean session id
                     self.session_id = header.split('sessionid=')[1].split(';')[0].strip()
                 except ValueError:
                     return
             elif 'name="csrfmiddlewaretoken"' in header:
                 try:
+                    # Extract and clean middleware token
                     self.middleware_token = header.split('value="')[1].split('"')[0].strip()
                 except ValueError:
                     return
         
+        # Return the extracted tokens
         return self.csrf_token, self.session_id, self.middleware_token
 
 
@@ -67,6 +77,7 @@ class WebCrawler:
         Returns:
             The constructed POST request.
         """
+        # Construct POST request parameters
         path = "/accounts/login/"
         params = {
                 "username": self.username,
@@ -74,17 +85,22 @@ class WebCrawler:
                 "csrfmiddlewaretoken": self.middleware_token,
                 "next": "/fakebook/"
         }
+        # Encode parameters into body
         body = urllib.parse.urlencode(params)
         body += "\r\n\r\n"
 
+        # Calculate content length
         length = len(body)
+        # Construct request header
         header = f"POST {path} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nContent-Type: application/x-www-form-urlencoded\r\nCookie: sessionid={self.session_id}; csrftoken={self.csrf_token}\r\nConnection: keep-alive\r\nContent-Length: {length}\r\n\r\n"
 
+        # Combine header and body to form POST request
         request = header + body
         return request
 
 
-    def read_data(self) -> str:
+
+        def read_data(self) -> str:
         """Reads data from the socket and decompresses gzip data.
 
         Returns:
@@ -92,17 +108,17 @@ class WebCrawler:
         """
         data = b""
         while True:
-            chunk = self.sock.recv(256)
+            chunk = self.sock.recv(256)  # Read data in chunks
             data += chunk
            
-            if not chunk: break
-            elif data[-2:] == b'\x00\x00':
-                header, body = data.split(b'\r\n\r\n', 1)
+            if not chunk: break  # Break if no more data
+            elif data[-2:] == b'\x00\x00':  # Check for end of gzip file
+                header, body = data.split(b'\r\n\r\n', 1)  # Split header and body
                 break
 
-        body = gzip.decompress(body)
-        data = header + body
-        return data.decode('ascii')
+        body = gzip.decompress(body)  # Decompress gzip data
+        data = header + body  # Combine header and body
+        return data.decode('ascii')  # Decode and return as ASCII string
 
 
     def read_header(self) -> str:
@@ -113,21 +129,21 @@ class WebCrawler:
         """
         data = ""
         while True:
-            chunk = self.sock.recv(256).decode('ascii')
+            chunk = self.sock.recv(256).decode('ascii')  # Read header in chunks
             data += chunk
             
-            if not chunk: break
-            elif "\r\n\r\n" in data: break
+            if not chunk: break  # Break if no more data
+            elif "\r\n\r\n" in data: break  # Break if end of header found
 
         return data
 
 
     def establish_socket(self) -> None:
         """Creates a TLS-wrapped socket connection."""
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock = context.wrap_socket(sock, server_hostname=self.server)
-        self.sock.connect((self.server, self.port))
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS)  # Create SSL context
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket
+        self.sock = context.wrap_socket(sock, server_hostname=self.server)  # Wrap socket with SSL
+        self.sock.connect((self.server, self.port))  # Connect to server
 
 
     def extract_urls(self, html: str) -> set:
@@ -138,17 +154,16 @@ class WebCrawler:
         Returns:
             Set of extracted URLs.
         """
-        pattern = r'<a\s.*?href="(.*?)".*?>(.*?)<\/a>'
-        values = re.findall(pattern, html)
+        pattern = r'<a\s.*?href="(.*?)".*?>(.*?)<\/a>'  # Define regex pattern for anchor tags
+        values = re.findall(pattern, html)  # Find all matches in HTML
         
         urls = set()
         for value in values:
-            url = value[0]
+            url = value[0]  # Extract URL from match
             if url and url not in self.explored and url not in self.to_explore:
-                urls.add(url)
+                urls.add(url)  # Add URL to set if not explored or queued
         
-        return urls
-
+        return urls  # Return set of URLs
 
     def find_secret_flags(self, url: str, html: str) -> None:
         """Searches for secret flags within the HTML content.
@@ -157,10 +172,10 @@ class WebCrawler:
             url: URL of the page being searched.
             html: HTML content of the page.
         """
-        pattern = r'<h3\s+class=\'secret_flag\'\s+style="color:red">FLAG:\s+([A-Za-z0-9]{64})<\/h3>'
-        flags = re.findall(pattern, html)
-        self.flags.update(flags)
-        
+        pattern = r'<h3\s+class=\'secret_flag\'\s+style="color:red">FLAG:\s+([A-Za-z0-9]{64})<\/h3>'  # Define regex pattern for secret flags
+        flags = re.findall(pattern, html)  # Find all flags in HTML
+        self.flags.update(flags)  # Add found flags to set of flags
+
 
     def check_response_codes(self, data: str) -> int:
         """Extracts the response code from the server response.
@@ -170,89 +185,89 @@ class WebCrawler:
         Returns:
             Extracted response code or -1 if not found.
         """
-        data_headers = data.split('\n')
+        data_headers = data.split('\n')  # Split server response into headers
 
         for header in data_headers:
-            if header.startswith('HTTP/1.1'):
+            if header.startswith('HTTP/1.1'):  # Check if header contains response code
                 try:
-                    response_code = int(header.split()[1])
-                    return response_code
+                    response_code = int(header.split()[1])  # Extract response code
+                    return response_code  # Return response code
                 except ValueError:
-                    return -1
+                    return -1  # Return -1 if unable to parse response code
 
-        return -1
-
+        return -1  # Return -1 if response code not found
 
     def traverse(self) -> None:
         """Recursively crawls through each page of discovered but unexplored 
         URLs, searching for secret flags and finding more URLs to explore.
         """
-        if len(self.to_explore) == 0:
+        if len(self.to_explore) == 0:  # If there are no URLs left to explore, return
             return 
         
-        new_urls = set()
-        for url in self.to_explore:
+        new_urls = set()  # Initialize a set for new URLs to explore
+        for url in self.to_explore:  # Iterate over URLs to explore
             get = f"GET {url} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_id};\r\nConnection: keep-alive\r\n\r\n"
 
-            while True:
-                self.sock.send(get.encode('ascii'))
-                html = self.read_data()
-                code = self.check_response_codes(html)
+            while True:  # Loop until valid response received
+                self.sock.send(get.encode('ascii'))  # Send GET request
+                html = self.read_data()  # Read response data
+                code = self.check_response_codes(html)  # Check response code
 
-                if code in {200, 403, 404, 302}:
+                if code in {200, 403, 404, 302}:  # If response code is expected
                     break
-                elif code == 503:
+                elif code == 503:  # If server is busy, retry
                     continue
                 else:
-                    raise ValueError(f"ERROR: Unexpected response code {code}")
+                    raise ValueError(f"ERROR: Unexpected response code {code}")  # Raise error for unexpected response code
 
-            if code == 404 or code == 403:
-                self.explored.add(url)
-                new_urls.update(self.extract_urls(html))
+            if code == 404 or code == 403:  # If page not found or forbidden
+                self.explored.add(url)  # Mark URL as explored
+                new_urls.update(self.extract_urls(html))  # Extract new URLs from HTML
                 continue
             
-            self.find_secret_flags(url, html)
+            self.find_secret_flags(url, html)  # Search for secret flags in HTML
 
-            if len(self.flags) == 5:
+            if len(self.flags) == 5:  # If all flags found, stop
                 return
 
-            self.explored.add(url)
-            new_urls.update(self.extract_urls(html))
+            self.explored.add(url)  # Mark URL as explored
+            new_urls.update(self.extract_urls(html))  # Extract new URLs from HTML
 
-        self.to_explore = new_urls
-        self.traverse()
-        
+        self.to_explore = new_urls  # Update URLs to explore
+        self.traverse()  # Recursively traverse new URLs
+
 
     def run_crawler(self):
-        self.establish_socket()
+        """Runs the web crawler."""
+        self.establish_socket()  # Establish socket connection to server
         
         path = "/accounts/login/?next=fakebook/"
         request = f"GET {path} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nConnection: keep-alive\r\n\r\n"
         
-        self.sock.send(request.encode('ascii'))
-        data = self.read_data()
-        self.find_tokens(data)
+        self.sock.send(request.encode('ascii'))  # Send GET request to login page
+        data = self.read_data()  # Read response data
+        self.find_tokens(data)  # Find tokens in response data
 
-        post = self.login()
-        post = post.encode('ascii')
-        self.sock.send(post)
+        post = self.login()  # Generate login POST request
+        post = post.encode('ascii')  # Encode POST request
+        self.sock.send(post)  # Send POST request
 
-        data = self.read_header()
-            
-        self.find_tokens(data)
+        data = self.read_header()  # Read response header
+        self.find_tokens(data)  # Find tokens in response header
 
         home = "/fakebook/"
         get = f"GET {home} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_id};\r\nConnection: keep-alive\r\n\r\n"
 
-        self.sock.send(get.encode('ascii'))
-        data = self.read_data()
+        self.sock.send(get.encode('ascii'))  # Send GET request to home page
+        data = self.read_data()  # Read response data
 
-        home_page_urls = self.extract_urls(data)
-        self.to_explore.update(home_page_urls)
-        self.traverse()
+        home_page_urls = self.extract_urls(data)  # Extract URLs from home page
+        self.to_explore.update(home_page_urls)  # Add home page URLs to explore
+        self.traverse()  # Traverse URLs to find flags
 
-        for flag in self.flags:
+        for flag in self.flags:  # Print found flags
             print(flag)
+
 
 
 if __name__ == "__main__":
