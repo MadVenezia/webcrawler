@@ -8,93 +8,91 @@ import re
 import gzip
 
 # Default server and port
-DEFAULT_SERVER = "www.3700.network"
+DEFAULT_SERVER = "www.example.com"
 DEFAULT_PORT = 443
 
-class WebCrawler:
+class CustomWebCrawler:
     def __init__(self, args):
         """
-        Initializes the WebCrawler object with necessary attributes.
+        Initializes the CustomWebCrawler object with necessary attributes.
 
         Args:
             args: Command-line arguments passed to the script.
         """
         # Server, port, username, password
-        self.server = args.server
-        self.port = args.port
-        self.username = args.username
+        self.server_address = args.server
+        self.server_port = args.port
+        self.user = args.user
         self.password = args.password
 
         # Tokens and flags
-        self.token = None
-        self.cookie = None
-        self.sock = None
-
         self.csrf_token = None
-        self.session_id = None
+        self.session_cookie = None
         self.middleware_token = None
+        self.secret_flags = set()
 
         # Explored URLs and URLs to explore
-        self.explored = {'/', '/accounts/logout/'}
-        self.to_explore = set()
-        self.flags = set()
+        self.visited_urls = {'/', '/logout/'}
+        self.urls_to_explore = set()
 
-    def find_tokens(self, data: str) -> tuple:
+        # Socket
+        self.ssl_socket = None
+
+    def retrieve_tokens(self, data: str) -> tuple:
         """
-        Extracts CSRF token, session ID, and middleware token from response data.
+        Extracts CSRF token, session cookie, and middleware token from response data.
 
         Args:
             data (str): Response data.
 
         Returns:
-            tuple: CSRF token, session ID, and middleware token.
+            tuple: CSRF token, session cookie, and middleware token.
         """
         data_headers = data.split('\n')
 
-        # Extracts tokens from headers
         for header in data_headers:
             if 'set-cookie: csrftoken=' in header:
                 try:
                     self.csrf_token = header.split('csrftoken=')[1].split(';')[0].strip()
                 except ValueError:
-                    return
+                    pass
             elif 'set-cookie: sessionid=' in header:
                 try:
-                    self.session_id = header.split('sessionid=')[1].split(';')[0].strip()
+                    self.session_cookie = header.split('sessionid=')[1].split(';')[0].strip()
                 except ValueError:
-                    return
+                    pass
             elif 'name="csrfmiddlewaretoken"' in header:
                 try:
                     self.middleware_token = header.split('value="')[1].split('"')[0].strip()
                 except ValueError:
-                    return
+                    pass
         
-        return self.csrf_token, self.session_id, self.middleware_token
+        return self.csrf_token, self.session_cookie, self.middleware_token
 
-    def login(self) -> str:
+    def perform_login(self) -> str:
         """
         Generates the login request.
 
         Returns:
             str: Login request.
         """
-        path = "/accounts/login/"
+        path = "/login/"
         params = {
-                "username": self.username,
+                "user": self.user,
                 "password": self.password,
                 "csrfmiddlewaretoken": self.middleware_token,
-                "next": "/fakebook/"
+                "next": "/dashboard/"
         }
         body = urllib.parse.urlencode(params)
         body += "\r\n\r\n"
 
         length = len(body)
-        header = f"POST {path} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nContent-Type: application/x-www-form-urlencoded\r\nCookie: sessionid={self.session_id}; csrftoken={self.csrf_token}\r\nConnection: keep-alive\r\nContent-Length: {length}\r\n\r\n"
+        header = f"POST {path} HTTP/1.1\r\nHost: {self.server_address}\r\nAccept-Encoding: gzip\r\nContent-Type: application/x-www-form-urlencoded\r\nCookie: sessionid={self.session_cookie}; csrftoken={self.csrf_token}\r\nConnection: keep-alive\r\nContent-Length: {length}\r\n\r\n"
 
-        request = header + body
-        return request
+        login_request = header + body
+        return login_request
 
-    def read_data(self) -> str:
+    def read_response_data(self) -> str:
         """
         Reads data from the socket.
 
@@ -103,7 +101,7 @@ class WebCrawler:
         """
         data = b""
         while True:
-            chunk = self.sock.recv(256)
+            chunk = self.ssl_socket.recv(256)
             data += chunk
            
             if not chunk:
@@ -117,37 +115,18 @@ class WebCrawler:
         data = header + body
         return data.decode('ascii')
 
-    def read_header(self) -> str:
+    def establish_ssl_socket(self) -> None:
         """
-        Reads header from the socket.
-
-        Returns:
-            str: Decoded header.
-        """
-        data = ""
-        while True:
-            chunk = self.sock.recv(256).decode('ascii')
-            data += chunk
-            
-            if not chunk:
-                break
-            elif "\r\n\r\n" in data:
-                break
-
-        return data
-
-    def establish_socket(self) -> None:
-        """
-        Establishes a socket connection.
+        Establishes a SSL socket connection.
         """
         context = ssl.SSLContext(ssl.PROTOCOL_TLS)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock = context.wrap_socket(sock, server_hostname=self.server)
-        self.sock.connect((self.server, self.port))
+        self.ssl_socket = context.wrap_socket(sock, server_hostname=self.server_address)
+        self.ssl_socket.connect((self.server_address, self.server_port))
 
-    def extract_urls(self, html: str) -> set:
+    def extract_hyperlinks(self, html: str) -> set:
         """
-        Extracts URLs from HTML content.
+        Extracts hyperlinks from HTML content.
 
         Args:
             html (str): HTML content.
@@ -161,7 +140,7 @@ class WebCrawler:
         urls = set()
         for value in values:
             url = value[0]
-            if url and url not in self.explored and url not in self.to_explore:
+            if url and url not in self.visited_urls and url not in self.urls_to_explore:
                 urls.add(url)
         
         return urls
@@ -176,9 +155,9 @@ class WebCrawler:
         """
         pattern = r'<h3\s+class=\'secret_flag\'\s+style="color:red">FLAG:\s+([A-Za-z0-9]{64})<\/h3>'
         flags = re.findall(pattern, html)
-        self.flags.update(flags)
+        self.secret_flags.update(flags)
 
-    def check_response_codes(self, data: str) -> int:
+    def check_http_response_code(self, data: str) -> int:
         """
         Checks HTTP response codes.
 
@@ -200,89 +179,90 @@ class WebCrawler:
 
         return -1
 
-    def traverse(self) -> None:
+    def traverse_urls(self) -> None:
         """
         Traverses URLs recursively.
         """
-        if len(self.to_explore) == 0:
+        if len(self.urls_to_explore) == 0:
             return 
         
         new_urls = set()
-        for url in self.to_explore:
-            get = f"GET {url} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_id};\r\nConnection: keep-alive\r\n\r\n"
+        for url in self.urls_to_explore:
+            get_request = f"GET {url} HTTP/1.1\r\nHost: {self.server_address}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_cookie};\r\nConnection: keep-alive\r\n\r\n"
             
             while True:
-                self.sock.send(get.encode('ascii'))
-                html = self.read_data()
+                self.ssl_socket.send(get_request.encode('ascii'))
+                html_data = self.read_response_data()
               
-                code = self.check_response_codes(html)
+                response_code = self.check_http_response_code(html_data)
 
-                if code in {200, 403, 404, 302}:
+                if response_code in {200, 403, 404, 302}:
                     break
-                elif code == 503:
+                elif response_code == 503:
                     continue
                 else:
-                    raise ValueError(f"ERROR: Unexpected response code {code}")
+                    raise ValueError(f"ERROR: Unexpected response code {response_code}")
 
-            if code == 404 or code == 403:
-                self.explored.add(url)
-                new_urls.update(self.extract_urls(html))
+            if response_code == 404 or response_code == 403:
+                self.visited_urls.add(url)
+                new_urls.update(self.extract_hyperlinks(html_data))
                 continue
             
-            self.find_secret_flags(url, html)
+            self.find_secret_flags(url, html_data)
 
-            if len(self.flags) == 5:
+            if len(self.secret_flags) == 5:
                 return
 
-            self.explored.add(url)
-            new_urls.update(self.extract_urls(html))
+            self.visited_urls.add(url)
+            new_urls.update(self.extract_hyperlinks(html_data))
 
-        self.to_explore = new_urls
-        self.traverse()
+        self.urls_to_explore = new_urls
+        self.traverse_urls()
 
-    def run_crawler(self):
+    def run_custom_crawler(self):
         """
-        Runs the web crawler.
+        Runs the custom web crawler.
         """
-        self.establish_socket()
+        self.establish_ssl_socket()
         
-        path = "/accounts/login/?next=fakebook/"
-        request = f"GET {path} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nConnection: keep-alive\r\n\r\n"
+        login_path = "/login/?next=dashboard/"
+        login_request += f"{self.server_address}\r\nAccept-Encoding: gzip\r\nConnection: keep-alive\r\n\r\n"
         
-        self.sock.send(request.encode('ascii'))
-        data = self.read_data()
-        self.find_tokens(data)
+        self.ssl_socket.send(login_request.encode('ascii'))
+        data = self.read_response_data()
+        self.retrieve_tokens(data)
 
-        post = self.login()
-        post = post.encode('ascii')
-        self.sock.send(post)
+        post_data = self.perform_login()
+        post_data = post_data.encode('ascii')
+        self.ssl_socket.send(post_data)
 
-        data = self.read_header()     
-        self.find_tokens(data)
+        response_data = self.read_response_data()     
+        self.retrieve_tokens(response_data)
 
-        home = "/fakebook/"
-        get = f"GET {home} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_id};\r\nConnection: keep-alive\r\n\r\n"
+        home_path = "/dashboard/"
+        get_request = f"GET {home_path} HTTP/1.1\r\nHost: {self.server_address}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_cookie};\r\nConnection: keep-alive\r\n\r\n"
 
-        self.sock.send(get.encode('ascii'))
-        data = self.read_data()
+        self.ssl_socket.send(get_request.encode('ascii'))
+        data = self.read_response_data()
 
-        home_page_urls = self.extract_urls(data)
-        self.to_explore.update(home_page_urls)
-        self.traverse()
+        home_page_urls = self.extract_hyperlinks(data)
+        self.urls_to_explore.update(home_page_urls)
+        self.traverse_urls()
 
-        for flag in self.flags:
+        for flag in self.secret_flags:
             print(flag)
 
 
 if __name__ == "__main__":
     # Argument parser for command-line interface
-    parser = argparse.ArgumentParser(description='crawl Fakebook')
+    parser = argparse.ArgumentParser(description='crawl ExampleSite')
     parser.add_argument('-s', dest="server", type=str, default=DEFAULT_SERVER, help="The server to crawl")
     parser.add_argument('-p', dest="port", type=int, default=DEFAULT_PORT, help="The port to use")
-    parser.add_argument('username', type=str, help="The username to use")
+    parser.add_argument('user', type=str, help="The username to use")
     parser.add_argument('password', type=str, help="The password to use")
     args = parser.parse_args()
 
-    # Create WebCrawler instance and run the crawler
-    crawler = WebCrawler(args)
-    crawler.run_crawler()
+    # Create CustomWebCrawler instance and run the crawler
+    crawler = CustomWebCrawler(args)
+    crawler.run_custom_crawler()
+
