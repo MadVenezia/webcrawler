@@ -7,7 +7,7 @@ import urllib.parse
 import re
 import gzip
 
-DEFAULT_SERVER = "www.example.com"
+DEFAULT_SERVER = "www.3700.network"
 DEFAULT_PORT = 443
 
 class WebCrawler:
