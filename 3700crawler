@@ -8,7 +8,7 @@ import re
 import gzip
 
 # Default server and port
-DEFAULT_SERVER = "www.example.com"
+DEFAULT_SERVER = "www.3700.network"
 DEFAULT_PORT = 443
 
 class CustomWebCrawler:
@@ -32,7 +32,7 @@ class CustomWebCrawler:
         self.secret_flags = set()
 
         # Explored URLs and URLs to explore
-        self.visited_urls = {'/', '/logout/'}
+        self.visited_urls = {'/', '/accounts/logout/'}
         self.urls_to_explore = set()
 
         # Socket
@@ -66,7 +66,7 @@ class CustomWebCrawler:
                     self.middleware_token = header.split('value="')[1].split('"')[0].strip()
                 except ValueError:
                     pass
-        
+
         return self.csrf_token, self.session_cookie, self.middleware_token
 
     def perform_login(self) -> str:
@@ -76,12 +76,12 @@ class CustomWebCrawler:
         Returns:
             str: Login request.
         """
-        path = "/login/"
+        path = "/accounts/login/"
         params = {
                 "user": self.user,
                 "password": self.password,
                 "csrfmiddlewaretoken": self.middleware_token,
-                "next": "/dashboard/"
+                "next": "/fakebook/"
         }
         body = urllib.parse.urlencode(params)
         body += "\r\n\r\n"
@@ -103,10 +103,10 @@ class CustomWebCrawler:
         while True:
             chunk = self.ssl_socket.recv(256)
             data += chunk
-           
+
             if not chunk:
                 break
-           
+
             elif data[-2:] == b'\x00\x00':
                 header, body = data.split(b'\r\n\r\n', 1)
                 break
@@ -136,13 +136,13 @@ class CustomWebCrawler:
         """
         pattern = r'<a\s.*?href="(.*?)".*?>(.*?)<\/a>'
         values = re.findall(pattern, html)
-        
+
         urls = set()
         for value in values:
             url = value[0]
             if url and url not in self.visited_urls and url not in self.urls_to_explore:
                 urls.add(url)
-        
+
         return urls
 
     def find_secret_flags(self, url: str, html: str) -> None:
@@ -184,16 +184,16 @@ class CustomWebCrawler:
         Traverses URLs recursively.
         """
         if len(self.urls_to_explore) == 0:
-            return 
-        
+            return
+
         new_urls = set()
         for url in self.urls_to_explore:
             get_request = f"GET {url} HTTP/1.1\r\nHost: {self.server_address}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_cookie};\r\nConnection: keep-alive\r\n\r\n"
-            
+
             while True:
                 self.ssl_socket.send(get_request.encode('ascii'))
                 html_data = self.read_response_data()
-              
+
                 response_code = self.check_http_response_code(html_data)
 
                 if response_code in {200, 403, 404, 302}:
@@ -207,7 +207,7 @@ class CustomWebCrawler:
                 self.visited_urls.add(url)
                 new_urls.update(self.extract_hyperlinks(html_data))
                 continue
-            
+
             self.find_secret_flags(url, html_data)
 
             if len(self.secret_flags) == 5:
@@ -224,10 +224,9 @@ class CustomWebCrawler:
         Runs the custom web crawler.
         """
         self.establish_ssl_socket()
-        
-        login_path = "/login/?next=dashboard/"
-        login_request += f"{self.server_address}\r\nAccept-Encoding: gzip\r\nConnection: keep-alive\r\n\r\n"
-        
+
+        login_request = f"{self.server_address}\r\nAccept-Encoding: gzip\r\nConnection: keep-alive\r\n\r\n"
+
         self.ssl_socket.send(login_request.encode('ascii'))
         data = self.read_response_data()
         self.retrieve_tokens(data)
@@ -236,10 +235,10 @@ class CustomWebCrawler:
         post_data = post_data.encode('ascii')
         self.ssl_socket.send(post_data)
 
-        response_data = self.read_response_data()     
+        response_data = self.read_response_data()
         self.retrieve_tokens(response_data)
 
-        home_path = "/dashboard/"
+        home_path = "/accounts/login/?next=fakebook/"
         get_request = f"GET {home_path} HTTP/1.1\r\nHost: {self.server_address}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_cookie};\r\nConnection: keep-alive\r\n\r\n"
 
         self.ssl_socket.send(get_request.encode('ascii'))
@@ -265,4 +264,3 @@ if __name__ == "__main__":
     # Create CustomWebCrawler instance and run the crawler
     crawler = CustomWebCrawler(args)
     crawler.run_custom_crawler()
-
