@@ -18,7 +18,7 @@ class WebCrawler:
         self.username = args.username
         self.password = args.password
 
-       self.token = None  # Stores authentication token
+        self.token = None  # Stores authentication token
         self.cookie = None  # Stores cookie information
         self.sock = None    # Socket object for connection
 
