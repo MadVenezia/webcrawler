@@ -10,10 +10,10 @@ import gzip
 DEFAULT_SERVER = "www.3700.network"
 DEFAULT_PORT = 443
 
-class MyWebCrawler:
+class WebCrawler:
     def __init__(self, args):
         """
-        Initialize the MyWebCrawler instance with provided arguments.
+        Initialize the WebCrawler instance with provided arguments.
 
         Args:
             args: Arguments provided via command line or programmatically.
@@ -250,7 +250,6 @@ class MyWebCrawler:
         
         path = "/accounts/login/?next=fakebook/"
         request = f"GET {path} HTTP/1.1
-        # Send initial GET request
         # Send initial GET request to retrieve the login page
         request += f"\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nConnection: keep-alive\r\n\r\n"
         
@@ -302,6 +301,6 @@ if __name__ == "__main__":
     parser.add_argument('password', type=str, help="The password to use")
     args = parser.parse_args()
     
-    # Create MyWebCrawler instance and run it
-    crawler = MyWebCrawler(args)
-    crawler.run_crawler()
+    # Create WebCrawler instance and run it
+    sender = WebCrawler(args)
+    sender.run_crawler()
