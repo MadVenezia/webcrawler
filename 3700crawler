@@ -227,7 +227,7 @@ class CustomWebCrawler:
         self.establish_ssl_socket()
         
         home_path = "/login/?next=fakebook/"
-        get_request = f"GET {login_path} HTTP/1.1\r\nHost: {self.server_address}\r\nAccept-Encoding: gzip\r\nConnection: keep-alive\r\n\r\n"
+        get_request = f"GET {home_path} HTTP/1.1\r\nHost: {self.server_address}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_cookie};\r\nConnection: keep-alive\r\n\r\n"
         
         self.ssl_socket.send(get_request.encode('ascii'))
         data = self.read_response_data()
@@ -241,8 +241,7 @@ class CustomWebCrawler:
         self.retrieve_tokens(response_data)
 
         home_path = "/dashboard/"
-        get_request = f"GET {home_path} HTTP/1.1\r\nHost: {self.server_address}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_cookie};\r\nConnection: keep-alive\r\n\r\n"
-
+       
         self.ssl_socket.send(get_request.encode('ascii'))
         data = self.read_response_data()
 
