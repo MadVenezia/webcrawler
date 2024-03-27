@@ -246,8 +246,7 @@ class WebCrawler:
         """
         self.establish_socket()
         
-        path = "/accounts/login/?next
-        = "fakebook/"
+        path = "/accounts/login/?next=fakebook/"
         request = f"GET {path} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nConnection: keep-alive\r\n\r\n"
         
         self.sock.send(request.encode('ascii'))
