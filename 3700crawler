@@ -99,13 +99,12 @@ class WebCrawler:
         return request
 
 
+    def read_data(self) -> str:
+        """Reads data from the socket and decompresses gzip data.
 
-        def read_data(self) -> str:
-            """Reads data from the socket and decompresses gzip data.
-
-             Returns:
-            Decompressed string data.
-            """
+        Returns:
+            Decompressed string data.55
+        """
         data = b""
         while True:
             chunk = self.sock.recv(256)  # Read data in chunks
