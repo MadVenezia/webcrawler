@@ -37,7 +37,7 @@ class WebCrawler:
 
     def find_tokens(self, data: str) -> tuple:
         """Extracts CSRF tokens and session id from server response.
-        
+
         Args:
             data: Server response data as a string.
         Returns:
@@ -66,14 +66,14 @@ class WebCrawler:
                     self.middleware_token = header.split('value="')[1].split('"')[0].strip()
                 except ValueError:
                     return
-        
+
         # Return the extracted tokens
         return self.csrf_token, self.session_id, self.middleware_token
 
 
     def login(self) -> str:
         """Generates a POST request to authenticate the user on the website.
-        
+
         Returns:
             The constructed POST request.
         """
@@ -103,13 +103,13 @@ class WebCrawler:
         """Reads data from the socket and decompresses gzip data.
 
         Returns:
-            Decompressed string data.55
+            Decompressed string data.
         """
         data = b""
         while True:
             chunk = self.sock.recv(256)  # Read data in chunks
             data += chunk
-           
+
             if not chunk: break  # Break if no more data
             elif data[-2:] == b'\x00\x00':  # Check for end of gzip file
                 header, body = data.split(b'\r\n\r\n', 1)  # Split header and body
@@ -130,7 +130,7 @@ class WebCrawler:
         while True:
             chunk = self.sock.recv(256).decode('ascii')  # Read header in chunks
             data += chunk
-            
+
             if not chunk: break  # Break if no more data
             elif "\r\n\r\n" in data: break  # Break if end of header found
 
@@ -155,13 +155,13 @@ class WebCrawler:
         """
         pattern = r'<a\s.*?href="(.*?)".*?>(.*?)<\/a>'  # Define regex pattern for anchor tags
         values = re.findall(pattern, html)  # Find all matches in HTML
-        
+
         urls = set()
         for value in values:
             url = value[0]  # Extract URL from match
             if url and url not in self.explored and url not in self.to_explore:
                 urls.add(url)  # Add URL to set if not explored or queued
-        
+
         return urls  # Return set of URLs
 
     def find_secret_flags(self, url: str, html: str) -> None:
@@ -197,12 +197,12 @@ class WebCrawler:
         return -1  # Return -1 if response code not found
 
     def traverse(self) -> None:
-        """Recursively crawls through each page of discovered but unexplored 
+        """Recursively crawls through each page of discovered but unexplored
         URLs, searching for secret flags and finding more URLs to explore.
         """
         if len(self.to_explore) == 0:  # If there are no URLs left to explore, return
-            return 
-        
+            return
+
         new_urls = set()  # Initialize a set for new URLs to explore
         for url in self.to_explore:  # Iterate over URLs to explore
             get = f"GET {url} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nCookie: sessionid={self.session_id};\r\nConnection: keep-alive\r\n\r\n"
@@ -223,7 +223,7 @@ class WebCrawler:
                 self.explored.add(url)  # Mark URL as explored
                 new_urls.update(self.extract_urls(html))  # Extract new URLs from HTML
                 continue
-            
+
             self.find_secret_flags(url, html)  # Search for secret flags in HTML
 
             if len(self.flags) == 5:  # If all flags found, stop
@@ -239,10 +239,10 @@ class WebCrawler:
     def run_crawler(self):
         """Runs the web crawler."""
         self.establish_socket()  # Establish socket connection to server
-        
+
         path = "/accounts/login/?next=fakebook/"
         request = f"GET {path} HTTP/1.1\r\nHost: {self.server}\r\nAccept-Encoding: gzip\r\nConnection: keep-alive\r\n\r\n"
-        
+
         self.sock.send(request.encode('ascii'))  # Send GET request to login page
         data = self.read_data()  # Read response data
         self.find_tokens(data)  # Find tokens in response data
